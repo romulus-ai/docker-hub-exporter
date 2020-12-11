@@ -15,10 +15,12 @@ The available environment variables are:
 
 Below is a list of the available flags. You can also find this list by using the `--help` flag.
 
-* `images` Images you wish to monitor: expected format 'user/image1,user/image2'
+* `images` Images you wish to monitor: expected format 'user/image1,user/image2' if you want more details, add the tag, i.e: grafana/grafana:latest
 * `listen-address` Address on which to expose metrics and web interface. (default ":9170")
 * `organisations` Organisations/Users you wish to monitor: expected format 'org1,org2'
-* `telemetry-path` Path under which to expose metrics. (default "/metrics") 
+* `telemetry-path` Path under which to expose metrics. (default "/metrics")
+
+***Hint: If an image is an "official" Image, use "library" as User***
 
 ## Install and deploy
 
@@ -40,7 +42,7 @@ that has also been passed into the application then Prometheus will error during
 
 ## Metrics
 
-Metrics will be made available on port 8080 by default
+Metrics will be made available on port 9170 by default
 An example of these metrics can be found in the `METRICS.md` markdown file in the root of this repository
 
 ## Metadata

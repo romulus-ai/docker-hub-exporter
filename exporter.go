@@ -20,7 +20,7 @@ var (
 	dockerHubImageLastUpdated = prometheus.NewDesc(
 		prometheus.BuildFQName(Namespace, "", "last_updated"),
 		"docker_hub_exporter: Docker Image Last Updated",
-		[]string{"image", "user"}, nil,
+		[]string{"image", "user", "tag", "arch", "os", "digest"}, nil,
 	)
 	dockerHubImagePullsTotal = prometheus.NewDesc(
 		prometheus.BuildFQName(Namespace, "", "pulls_total"),
@@ -36,6 +36,16 @@ var (
 		prometheus.BuildFQName(Namespace, "", "is_automated"),
 		"docker_hub_exporter: Docker Image Is Automated.",
 		[]string{"image", "user"}, nil,
+	)
+	dockerHubImageSize = prometheus.NewDesc(
+		prometheus.BuildFQName(Namespace, "", "size"),
+		"docker_hub_exporter: Docker Image Size.",
+		[]string{"image", "user", "tag", "arch", "os", "digest"}, nil,
+	)
+	dockerHubImageStatus = prometheus.NewDesc(
+		prometheus.BuildFQName(Namespace, "", "status"),
+		"docker_hub_exporter: Docker Image Status.",
+		[]string{"image", "user", "tag", "arch", "os", "digest"}, nil,
 	)
 )
 
@@ -65,10 +75,24 @@ type ImageResult struct {
 	LastUpdated time.Time `json:"last_updated"`
 }
 
+type ImageTagResult struct {
+	Tag    string                 `json:"name"`
+	Images []ImageTagDetailResult `json:"images"`
+}
+
+type ImageTagDetailResult struct {
+	Status      string    `json:"status"`
+	Arch        string    `json:"architecture"`
+	OS          string    `json:"os"`
+	Digest      string    `json:"digest"`
+	LastUpdated time.Time `json:"last_pushed"`
+	Size        float64   `json:"size"`
+}
+
 // New creates a new Exporter and returns it
 func New(organisations, images []string, connectionRetries int, opts ...Option) *Exporter {
 	e := &Exporter{
-		timeout:       	   time.Second * 5,
+		timeout:           time.Second * 5,
 		baseURL:           "https://hub.docker.com/v2/repositories/",
 		organisations:     organisations,
 		images:            images,
@@ -106,6 +130,8 @@ func (e Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- dockerHubImagePullsTotal
 	ch <- dockerHubImageStars
 	ch <- dockerHubImageIsAutomated
+	ch <- dockerHubImageSize
+	ch <- dockerHubImageStatus
 }
 
 // Collect implements the prometheus.Collector interface.
@@ -132,7 +158,7 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 
 				for _, orgResp := range response {
 					for _, result := range orgResp.Results {
-						e.processImageResult(result, ch)
+						e.processImageResult(result, "", ch)
 					}
 				}
 			}
@@ -143,6 +169,13 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 
 	for _, url := range e.images {
 		go func(url string) {
+			tag := ""
+			if strings.Contains(url, ":") {
+				splittmp := strings.Split(url, ":")
+				url = splittmp[0]
+				tag = splittmp[1]
+			}
+
 			if url != "" {
 				response, err := e.getImageMetrics(fmt.Sprintf("%s%s", e.baseURL, url))
 
@@ -152,7 +185,24 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 					return
 				}
 
-				e.processImageResult(response, ch)
+				e.processImageResult(response, tag, ch)
+
+				if tag != "" {
+					tagurl := url + "/tags/" + tag
+					response, err := e.getImageTagMetrics(fmt.Sprintf("%s%s", e.baseURL, tagurl))
+
+					if err != nil {
+						e.logger.Println("error ", err)
+						wg.Done()
+						return
+					}
+
+					splittmp := strings.Split(url, "/")
+					user := splittmp[0]
+					imagename := splittmp[1]
+
+					e.processImageTagResult(response, user, imagename, ch)
+				}
 			}
 
 			wg.Done()
@@ -162,7 +212,7 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 	wg.Wait()
 }
 
-func (e Exporter) processImageResult(result ImageResult, ch chan<- prometheus.Metric) {
+func (e Exporter) processImageResult(result ImageResult, tag string, ch chan<- prometheus.Metric) {
 	if result.Name != "" && result.User != "" {
 		var isAutomated float64
 		if result.IsAutomated {
@@ -176,7 +226,29 @@ func (e Exporter) processImageResult(result ImageResult, ch chan<- prometheus.Me
 		ch <- prometheus.MustNewConstMetric(dockerHubImageStars, prometheus.GaugeValue, result.StarCount, result.Name, result.User)
 		ch <- prometheus.MustNewConstMetric(dockerHubImageIsAutomated, prometheus.GaugeValue, isAutomated, result.Name, result.User)
 		ch <- prometheus.MustNewConstMetric(dockerHubImagePullsTotal, prometheus.CounterValue, result.PullCount, result.Name, result.User)
-		ch <- prometheus.MustNewConstMetric(dockerHubImageLastUpdated, prometheus.GaugeValue, lastUpdated, result.Name, result.User)
+		// If there is no tag given, we use the last update of the default image
+		if tag == "" {
+			ch <- prometheus.MustNewConstMetric(dockerHubImageLastUpdated, prometheus.GaugeValue, lastUpdated, result.Name, result.User, tag, "amd64", "linux", "")
+		}
+	}
+}
+
+func (e Exporter) processImageTagResult(result ImageTagResult, user string, imagename string, ch chan<- prometheus.Metric) {
+	if result.Tag != "" {
+		for _, image := range result.Images {
+			lastUpdated := float64(image.LastUpdated.UnixNano()) / 1e9
+			ch <- prometheus.MustNewConstMetric(dockerHubImageLastUpdated, prometheus.GaugeValue, lastUpdated, imagename, user, result.Tag, image.Arch, image.OS, image.Digest)
+
+			ch <- prometheus.MustNewConstMetric(dockerHubImageSize, prometheus.GaugeValue, image.Size, imagename, user, result.Tag, image.Arch, image.OS, image.Digest)
+
+			// we assume images are inactive
+			imageStatus := float64(0)
+			if image.Status == "active" {
+				imageStatus = float64(1)
+			}
+
+			ch <- prometheus.MustNewConstMetric(dockerHubImageStatus, prometheus.GaugeValue, imageStatus, imagename, user, result.Tag, image.Arch, image.OS, image.Digest)
+		}
 	}
 }
 
@@ -194,6 +266,22 @@ func (e Exporter) getImageMetrics(url string) (ImageResult, error) {
 	}
 
 	return imageResult, nil
+}
+
+func (e Exporter) getImageTagMetrics(url string) (ImageTagResult, error) {
+	imageTagResult := ImageTagResult{}
+
+	body, err := e.getResponse(url)
+	if err != nil {
+		return ImageTagResult{}, err
+	}
+
+	err = json.Unmarshal(body, &imageTagResult)
+	if err != nil {
+		return ImageTagResult{}, fmt.Errorf("Error unmarshalling response: %v", err)
+	}
+
+	return imageTagResult, nil
 }
 
 func (e Exporter) getOrgMetrics(url string) ([]OrganisationResult, error) {
@@ -250,7 +338,7 @@ func (e Exporter) getResponse(url string) ([]byte, error) {
 
 // getHTTPResponse handles the http client creation, token setting and returns the *http.response
 func (e Exporter) getHTTPResponse(url string) (*http.Response, error) {
-	
+
 	client := &http.Client{
 		Timeout: e.timeout,
 	}
