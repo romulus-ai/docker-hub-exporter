@@ -76,8 +76,10 @@ type ImageResult struct {
 }
 
 type ImageTagResult struct {
-	Tag    string                 `json:"name"`
-	Images []ImageTagDetailResult `json:"images"`
+	Tag            string                 `json:"name"`
+	TagLastPushed  time.Time              `json:"tag_last_pushed"`
+	TagLastUpdated time.Time              `json:"last_updated"`
+	Images         []ImageTagDetailResult `json:"images"`
 }
 
 type ImageTagDetailResult struct {
@@ -236,7 +238,16 @@ func (e Exporter) processImageResult(result ImageResult, tag string, ch chan<- p
 func (e Exporter) processImageTagResult(result ImageTagResult, user string, imagename string, ch chan<- prometheus.Metric) {
 	if result.Tag != "" {
 		for _, image := range result.Images {
-			lastUpdated := float64(image.LastUpdated.UnixNano()) / 1e9
+			lastUpdatedTimestamp := result.TagLastUpdated
+
+			if !result.TagLastPushed.IsZero() {
+				lastUpdatedTimestamp = result.TagLastPushed
+			}
+
+			if !image.LastUpdated.IsZero() {
+				lastUpdatedTimestamp = image.LastUpdated
+			}
+			lastUpdated := float64(lastUpdatedTimestamp.UnixNano()) / 1e9
 			ch <- prometheus.MustNewConstMetric(dockerHubImageLastUpdated, prometheus.GaugeValue, lastUpdated, imagename, user, result.Tag, image.Arch, image.OS, image.Digest)
 
 			ch <- prometheus.MustNewConstMetric(dockerHubImageSize, prometheus.GaugeValue, image.Size, imagename, user, result.Tag, image.Arch, image.OS, image.Digest)
