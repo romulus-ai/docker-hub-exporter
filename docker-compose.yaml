@@ -1,0 +1,9 @@
+version: "2.4"
+services:
+  dockerhubexporter:
+    image: dockerhubexporter:0.1
+    command:
+      - '-images=anasaso/ssllabs_exporter:latest,eclipse-mosquitto:1.6,grafana/grafana:latest,hikhvar/mqtt2prometheus:latest,hikhvar/mqtt2prometheus:latest-arm64,jrcs/letsencrypt-nginx-proxy-companion:latest,jwilder/nginx-proxy:alpine,miguelndecarvalho/speedtest-exporter:latest,mxschmitt/fritzbox_exporter:latest,mxschmitt/fritzbox_exporter:latest-arm64v8,nextcloud:20-apache,percona:8,prom/alertmanager:latest,prom/blackbox-exporter:master,prom/node-exporter:latest,prom/prometheus:latest,prom/pushgateway:latest,redis:6-alpine,romulusai/clamav-fully-loaded:latest,romulusai/docker-hub-exporter:latest,romulusai/nextcloud-news-updater:latest,romulusai/roomba-exporter:latest,romulusai/roomba-exporter:latest-arm64,zcube/cadvisor:latest'
+    restart: unless-stopped
+    ports:
+      - "9170:9170"

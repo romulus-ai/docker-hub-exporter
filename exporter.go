@@ -25,17 +25,17 @@ var (
 	dockerHubImagePullsTotal = prometheus.NewDesc(
 		prometheus.BuildFQName(Namespace, "", "pulls_total"),
 		"docker_hub_exporter: Docker Image Pulls Total.",
-		[]string{"image", "user"}, nil,
+		[]string{"image", "user", "tag"}, nil,
 	)
 	dockerHubImageStars = prometheus.NewDesc(
 		prometheus.BuildFQName(Namespace, "", "stars"),
 		"docker_hub_exporter: Docker Image Stars.",
-		[]string{"image", "user"}, nil,
+		[]string{"image", "user", "tag"}, nil,
 	)
 	dockerHubImageIsAutomated = prometheus.NewDesc(
 		prometheus.BuildFQName(Namespace, "", "is_automated"),
 		"docker_hub_exporter: Docker Image Is Automated.",
-		[]string{"image", "user"}, nil,
+		[]string{"image", "user", "tag"}, nil,
 	)
 	dockerHubImageSize = prometheus.NewDesc(
 		prometheus.BuildFQName(Namespace, "", "size"),
@@ -169,8 +169,6 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 		}(strings.TrimSpace(url))
 	}
 
-	imagecounter := make(map[string]int)
-
 	for _, url := range e.images {
 		go func(url string) {
 			tag := ""
@@ -181,19 +179,15 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 			}
 
 			if url != "" {
-				// if we not already checked this image
-				if imagecounter[url] < 1 {
-					response, err := e.getImageMetrics(fmt.Sprintf("%s%s", e.baseURL, url))
+				response, err := e.getImageMetrics(fmt.Sprintf("%s%s", e.baseURL, url))
 
-					if err != nil {
-						e.logger.Println("error ", err)
-						wg.Done()
-						return
-					}
-
-					e.processImageResult(response, tag, ch)
-					imagecounter[url] = 1
+				if err != nil {
+					e.logger.Println("error ", err)
+					wg.Done()
+					return
 				}
+
+				e.processImageResult(response, tag, ch)
 
 				if tag != "" {
 					tagurl := url + "/tags/" + tag
@@ -231,13 +225,14 @@ func (e Exporter) processImageResult(result ImageResult, tag string, ch chan<- p
 
 		lastUpdated := float64(result.LastUpdated.UnixNano()) / 1e9
 
-		ch <- prometheus.MustNewConstMetric(dockerHubImageStars, prometheus.GaugeValue, result.StarCount, result.Name, result.User)
-		ch <- prometheus.MustNewConstMetric(dockerHubImageIsAutomated, prometheus.GaugeValue, isAutomated, result.Name, result.User)
-		ch <- prometheus.MustNewConstMetric(dockerHubImagePullsTotal, prometheus.CounterValue, result.PullCount, result.Name, result.User)
 		// If there is no tag given, we use the last update of the default image
 		if tag == "" {
+			tag = "latest"
 			ch <- prometheus.MustNewConstMetric(dockerHubImageLastUpdated, prometheus.GaugeValue, lastUpdated, result.Name, result.User, tag, "amd64", "linux", "")
 		}
+		ch <- prometheus.MustNewConstMetric(dockerHubImageStars, prometheus.GaugeValue, result.StarCount, result.Name, result.User, tag)
+		ch <- prometheus.MustNewConstMetric(dockerHubImageIsAutomated, prometheus.GaugeValue, isAutomated, result.Name, result.User, tag)
+		ch <- prometheus.MustNewConstMetric(dockerHubImagePullsTotal, prometheus.CounterValue, result.PullCount, result.Name, result.User, tag)
 	}
 }
 
