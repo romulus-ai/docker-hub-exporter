@@ -169,7 +169,7 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 		}(strings.TrimSpace(url))
 	}
 
-	var imagecounter map[string]int
+	imagecounter := make(map[string]int)
 
 	for _, url := range e.images {
 		go func(url string) {
