@@ -169,6 +169,8 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 		}(strings.TrimSpace(url))
 	}
 
+	var imagecounter map[string]int
+
 	for _, url := range e.images {
 		go func(url string) {
 			tag := ""
@@ -179,15 +181,19 @@ func (e Exporter) collectMetrics(ch chan<- prometheus.Metric) {
 			}
 
 			if url != "" {
-				response, err := e.getImageMetrics(fmt.Sprintf("%s%s", e.baseURL, url))
+				// if we not already checked this image
+				if imagecounter[url] < 1 {
+					response, err := e.getImageMetrics(fmt.Sprintf("%s%s", e.baseURL, url))
 
-				if err != nil {
-					e.logger.Println("error ", err)
-					wg.Done()
-					return
+					if err != nil {
+						e.logger.Println("error ", err)
+						wg.Done()
+						return
+					}
+
+					e.processImageResult(response, tag, ch)
+					imagecounter[url] = 1
 				}
-
-				e.processImageResult(response, tag, ch)
 
 				if tag != "" {
 					tagurl := url + "/tags/" + tag
